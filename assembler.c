@@ -96,8 +96,7 @@ char* change_file_ext(char *str) {
 }
 
 /* Add symbol to global symbol table */
-void symbol_table_add_entry(symbol_t symbol)
-{
+void symbol_table_add_entry(symbol_t symbol){
     SYMBOL_TABLE[symbol_table_cur_index++] = symbol;
 #if DEBUG
     printf("%s: 0x%08x\n", symbol.name, symbol.address);
@@ -146,13 +145,39 @@ void record_text_section(FILE *output)
         rs = rt = rd = imm = shamt = addr = 0;
 #if DEBUG
         printf("0x%08x: ", cur_addr);
+        /* Find thethat matches the line */
 #endif
-        /* Find the instruction type that matches the line */
         /* blank */
-
+	    char* temp;
+        char _line[1024] = { 0 };
+        strcpy(_line, line);
+        temp = strtok(_line, "\t\n");
+        for (i = 0; i < INST_LIST_LEN; i++) {    
+            if (!strcmp(temp, inst_list[i].name)) {
+                type=inst_list[i].type;
+                idx=i;
+                break;
+            }
+        }
+        strcpy(op, inst_list[idx].op);
+        
         switch (type) {
             case 'R':
-                /* blank */
+                /* blank */  
+                rd = (idx==10)?0:atoi(strtok(NULL, ", $"));
+                if (idx == 18 || idx == 19) {
+                    rt = atoi(strtok(NULL, ", $"));
+                    shamt = atoi(strtok(NULL, ", $"));
+                }
+
+                else {
+                    rs = atoi(strtok(NULL, ", $"));
+                    rt = (idx==10)?0:atoi(strtok(NULL, ", $"));
+                }
+                
+                printf("%s%s%s%s%s%s\n", op, num_to_bits(rs, 5), num_to_bits(rt, 5), num_to_bits(rd, 5), num_to_bits(shamt, 5), inst_list[idx].funct);
+                fprintf(output, "%s%s%s%s%s%s", op, num_to_bits(rs, 5), num_to_bits(rt, 5), num_to_bits(rd, 5), num_to_bits(shamt, 5), inst_list[idx].funct);
+            	
 #if DEBUG
                 printf("op:%s rs:$%d rt:$%d rd:$%d shamt:%d funct:%s\n",
                         op, rs, rt, rd, shamt, inst_list[idx].funct);
@@ -160,7 +185,41 @@ void record_text_section(FILE *output)
                 break;
 
             case 'I':
-                /* blank */
+                /* blank */ 
+                if (idx == 6 || idx == 7) {
+                    // beq,bne
+                    rs = atoi(strtok(NULL, ", $()"));
+                    rt = atoi(strtok(NULL, ", $()"));
+                    temp = strtok(NULL, ", $()\n");
+                    for (int j = 0; j < symbol_table_cur_index; j++) {
+                        if (!strcmp(temp, SYMBOL_TABLE[j].name)) {
+                            imm = (int)(SYMBOL_TABLE[j].address - (cur_addr + 4)) / 4;
+                            break;
+                        }
+                    }		
+                }
+                else if (idx == 12 || idx == 20) {
+                    // lw,sw
+                    rt = atoi(strtok(NULL, ", $()"));
+                    imm = atoi(strtok(NULL, ", $()"));
+                    rs = atoi(strtok(NULL, ", $()"));
+                }
+                else {
+                    // 나머지
+                        rt = atoi(strtok(NULL, ", $"));
+                        rs=(idx==11)?0:atoi(strtok(NULL, ", $"));
+                        temp = strtok(NULL, ", $");
+                        if (strstr(temp,"0x")!=NULL) {
+                            imm = (int)strtol(temp, NULL, 16);
+                        }
+                        else {
+                            imm = atoi(temp);
+                        }      
+                }
+            
+                printf("%s%s%s%s\n", op, num_to_bits(rs, 5), num_to_bits(rt, 5), num_to_bits(imm, 16));
+                fprintf(output, "%s%s%s%s", op, num_to_bits(rs, 5), num_to_bits(rt, 5), num_to_bits(imm, 16));          
+                    
 #if DEBUG
                 printf("op:%s rs:$%d rt:$%d imm:0x%x\n",
                         op, rs, rt, imm);
@@ -169,6 +228,16 @@ void record_text_section(FILE *output)
 
             case 'J':
                 /* blank */
+                    temp = strtok(NULL, ", $()\n");
+		    for (int j = 0; j < symbol_table_cur_index; j++) {
+		        if (!strcmp(temp, SYMBOL_TABLE[j].name)) {
+		            addr = (int)(SYMBOL_TABLE[j].address) / 4;
+		            break;
+		        }
+		    }
+		    printf("%s%s\n", op, num_to_bits(addr, 26));
+		    fprintf(output,"%s%s",op,num_to_bits(addr,26));
+                
 #if DEBUG
                 printf("op:%s addr:%i\n", op, addr);
 #endif
@@ -195,6 +264,19 @@ void record_data_section(FILE *output)
     /* Print .data section */
     while (fgets(line, 1024, data_seg) != NULL) {
         /* blank */
+        char* temp;
+        uint32_t n=0;
+        strtok(line, "\t");
+        temp=strtok(NULL,"\n");
+        if (strstr(temp, "0x") != NULL) {
+	    n = strtol(temp, NULL, 16);
+	}
+	else {
+	    n = atoi(temp);
+	}
+	    printf("%s\n", num_to_bits(n, 32));
+        fprintf(output,"%s\n",num_to_bits(n,32));
+        
 #if DEBUG
         printf("0x%08x: ", cur_addr);
         printf("%s", line);
@@ -219,7 +301,11 @@ void make_binary_file(FILE *output)
 
     /* Print text section size and data section size */
     /* blank */
-
+    printf("%s\n", num_to_bits(text_section_size, 32));
+    fprintf(output, "%s\n", num_to_bits(text_section_size,32));
+    printf("%s\n", num_to_bits(data_section_size, 32));
+    fprintf(output, "%s\n", num_to_bits(data_section_size,32));
+    
     /* Print .text section */
     record_text_section(output);
 
@@ -228,41 +314,88 @@ void make_binary_file(FILE *output)
 }
 
 /* Fill the blanks */
-void make_symbol_table(FILE *input)
-{
+void make_symbol_table(FILE *input){
     char line[1024] = {0};
     uint32_t address = 0;
     enum section cur_section = MAX_SIZE;
-
     /* Read each section and put the stream */
     while (fgets(line, 1024, input) != NULL) {
         char *temp;
         char _line[1024] = {0};
         strcpy(_line, line);
         temp = strtok(_line, "\t\n");
-
         /* Check section type */
+        
         if (!strcmp(temp, ".data")) {
             /* blank */
+            cur_section = DATA;
             data_seg = tmpfile();
             continue;
         }
         else if (!strcmp(temp, ".text")) {
             /* blank */
+            cur_section = TEXT;
             text_seg = tmpfile();
+            data_section_size = address;
+            address=0;
             continue;
         }
-
+        
         /* Put the line into each segment stream */
         if (cur_section == DATA) {
             /* blank */
+            if (strchr(temp, ':') != NULL) {
+                temp = strtok(temp,":");
+                strcpy(SYMBOL_TABLE[symbol_table_cur_index].name, temp);             
+                SYMBOL_TABLE[symbol_table_cur_index].address =MEM_DATA_START + address;
+                fprintf(data_seg,"%s",line+strlen(temp)+2);        
+                symbol_table_cur_index++;
+            }
+            else{
+            	fprintf(data_seg, "%s", line+1);
+            }
+            
         }
         else if (cur_section == TEXT) {
             /* blank */
+            if (strchr(temp, ':') != NULL) {
+                temp = strtok(temp, ":");
+                strcpy(SYMBOL_TABLE[symbol_table_cur_index].name, temp);
+                SYMBOL_TABLE[symbol_table_cur_index].address = MEM_TEXT_START + address;
+                symbol_table_cur_index++;
+                continue;
+            }
+            else if(!strcmp(temp,"la")){
+                char *rt;
+                rt=strtok(temp+3, ", \n");
+                temp=strtok(rt+3,"\n ");
+                for (int j = 0; j < symbol_table_cur_index; j++) {
+                    if (!strcmp(temp, SYMBOL_TABLE[j].name)) {
+                        sprintf(temp,"%x", SYMBOL_TABLE[j].address);
+                        break;
+                    }
+                }
+                if (!strcmp(temp + 4, "0000")) {
+                    temp[4] = '\0';
+                    fprintf(text_seg,"%s\t%s, 0x%s\n","lui",rt,temp);
+                }
+                else{
+                    char rear[10] = { 0 };
+                    strcpy(rear, temp);
+                    temp[4] = '\0';
+                    fprintf(text_seg,"%s\t%s, 0x%s\n","lui",rt,temp);
+                    address += BYTES_PER_WORD; 
+                    fprintf(text_seg,"%s\t%s, %s, 0x%s\n","ori",rt,rt,rear+4);
+                }
+		   
+	        }
+            else {
+                fprintf(text_seg, "%s", line+1);
+            }
         }
-
-        address += BYTES_PER_WORD;
+        address += BYTES_PER_WORD;     	
     }
+    text_section_size = address;
 }
 
 /******************************************************
@@ -286,8 +419,7 @@ void make_symbol_table(FILE *input)
  *
  *******************************************************/
 
-int main(int argc, char* argv[])
-{
+int main(int argc, char* argv[]){
     FILE *input, *output;
     char *filename;
 
